@@ -47,10 +47,10 @@ package object AcaCustom
         val byte_idx_in_word = req_addr(word_len_bit - 1, 0)
         val read_data_ori = LoadDataGen(word_data_ori >> (byte_idx_in_word << 3), io.core_port.req.bits.typ)
         when(io.mem_port.resp.valid){
-            for(i <- 0 until 16)
-                printf("burst data %d: %x\n", UInt(i),burst_data(i))
+            //for(i <- 0 until 16)
+                //printf("burst data %d: %x\n", UInt(i),burst_data(i))
             
-            printf("offset:%x ,read data ori: %x\n",word_idx_in_burst, read_data_ori)
+            //printf("offset:%x ,read data ori: %x\n",word_idx_in_burst, read_data_ori)
         }
         
         // Wiring
@@ -88,7 +88,7 @@ package object AcaCustom
         val byte_offset = req_addr(1,0)
         dcache_read_addr := index
         dcache_write_data(DCACHE_BITS-1,DCACHE_BITS-1) := Bits(1,1)
-        dcache_write_data(DCACHE_BITS-2,DCACHE_BITS-11) := tag
+        dcache_write_data(DCACHE_BITS-2,DCACHE_BITS-17) := tag
         val word_data = Bits() 
         val read_data = Bits()
         word_data := Mux1H(UIntToOH(word_offset, width=(burst_len / word_len)),dcache_read_burst)
@@ -118,7 +118,7 @@ package object AcaCustom
         {
             is(s_idle)
             {
-                printf("idle\n")
+                //printf("idle\n")
                 io.core_port.resp.valid := Bool(false)
                 
                 when ( io.core_port.req.valid )
@@ -128,14 +128,14 @@ package object AcaCustom
                     when ( io.core_port.req.bits.fcn === M_XRD )
                     {
 		    	//read hit
-                        printf("read\n")
+                        //printf("read\n")
                         io.core_port.resp.valid := Bool(false)
-			printf("tag : %x\n",tag)
+			//printf("tag : %x\n",tag)
                         when(dcache_read_out(DCACHE_BITS-1,DCACHE_BITS-1) === Bits(1,1) 
-                             && dcache_read_out(DCACHE_BITS-2,DCACHE_BITS-11) === tag)
+                             && dcache_read_out(DCACHE_BITS-2,DCACHE_BITS-17) === tag)
                         {
                             {
-                        	printf("read hit\n")
+                        	//printf("read hit\n")
 			    	
                                 io.core_port.resp.valid := Bool(true)
                                 for(k <- 0 until 16)
@@ -151,7 +151,7 @@ package object AcaCustom
                         //cache miss, load memory
                         .otherwise
                         {
-                            printf("read miss\n")
+                            //printf("read miss\n")
                             io.mem_port.req.valid := Bool(true)
                             io.mem_port.req.bits.addr := io.core_port.req.bits.addr
                             io.mem_port.req.bits.data := io.core_port.req.bits.data
@@ -163,7 +163,7 @@ package object AcaCustom
                     //write access
                     when ( io.core_port.req.bits.fcn === M_XWR )
                     {
-                        printf("write\n")
+                        //printf("write\n")
                            
                         //write memory
                         io.core_port.resp.valid := Bool(false)
@@ -174,44 +174,47 @@ package object AcaCustom
                         io.mem_port.req.bits.typ := io.core_port.req.bits.typ
                         //write hit    
                        	when(dcache_read_out(DCACHE_BITS-1,DCACHE_BITS-1) === Bits(1,1) 
-                             && dcache_read_out(DCACHE_BITS-2,DCACHE_BITS-11) === tag)
+                             && dcache_read_out(DCACHE_BITS-2,DCACHE_BITS-17) === tag)
 			{
-                            printf("write hit\n")
+                            //printf("write hit\n")
                             val wdata = (StoreDataGen(req_data, req_typ)<< UInt(word_offset<<5))
-                            val write_mask = Fill(32,UInt(0x1)) << UInt(word_offset<<5)
-                            printf("index= %x, req_data= %x, wdata= %x, wmask=%x \n",index,req_data,wdata,write_mask)
+      			    val byte_shift_amt = req_addr(1, 0)
+      			    val bit_shift_amt  = Cat(byte_shift_amt, UInt(0,3))
+         		    val wmask = (StoreMask(req_typ) << bit_shift_amt)(31,0)
+                            val write_mask = wmask << UInt(word_offset<<5)
+                            //printf("index= %x, req_data= %x, wdata= %x, wmask=%x \n",index,req_data,wdata,write_mask)
                                   
                             dcache.write(index, wdata, write_mask)
                             when ( io.mem_port.resp.valid )
                             {
-                                printf("memory response\n")
+                            //    printf("memory response\n")
                                 io.core_port.resp.valid := Bool(true)
                                 state := s_idle
                             }
 			}
 			.otherwise{    //write miss
-                            printf("write miss\n")
+                            //printf("write miss\n")
                             state := s_load
 			}
                     }
 
                 }
                 val dcache_read_out_2 = dcache(index_reg)
-                printf("index_reg: %x, cache_line: %x\n", index_reg,dcache_read_out_2)
+                //printf("index_reg: %x, cache_line: %x\n", index_reg,dcache_read_out_2)
             }
             
 
             //cache miss, load memory
             is(s_load)
             {
-                printf("load\n")
+                //printf("load\n")
                 io.core_port.resp.valid := Bool(false)
                 when ( io.mem_port.resp.valid )
                 {   
                     for(k <- 0 until 16) 
                         dcache_write_data(32*k+31,32*k) := burst_data(k)
                     dcache.write(index, dcache_write_data)
-                    printf("abc dcache_write_data: %x\n", dcache_write_data)
+                    //printf("abc dcache_write_data: %x\n", dcache_write_data)
                     state := s_idle
                 }
             }
