@@ -87,7 +87,6 @@ package object AcaCustom
         val wmask = (StoreMask(req_typ) << bit_shift_amt)(31,0)
         val write_mask = wmask << UInt(word_offset<<5)
         
-	val csr = Module(new CSRFile())
 	
 	//Control CACHE signal
         switch(state) //idle or load
