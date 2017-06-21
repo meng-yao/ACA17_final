@@ -34,12 +34,6 @@ package object AcaCustom
         
         val burst_data     = io.mem_port.resp.bits.burst_data
         
-        // Wiring
-        io.mem_port.req.valid := Bool(false)
-        io.mem_port.req.bits.addr := Bits(0)
-        io.mem_port.req.bits.data := Bits(0)
-        io.mem_port.req.bits.fcn := Bits(0)
-        io.mem_port.req.bits.typ := Bits(0)
 
 	//DCACHE configuration
         val DCACHE_ENTRIES = 1024
@@ -65,27 +59,47 @@ package object AcaCustom
         val state = Reg(init = s_idle)
 	
 	//Init
-	dcache_write_data := UInt(0)
-	word_data := UInt(0)
-	read_data := UInt(0) 
         for(k <- 0 until 16)
             dcache_read_burst(k) := Bits(0) 
+        
+	// Wiring
+        io.mem_port.req.valid := Bool(false)
+        io.mem_port.req.bits.addr := io.core_port.req.bits.addr
+        io.mem_port.req.bits.data := io.core_port.req.bits.data
+        io.mem_port.req.bits.fcn := io.core_port.req.bits.fcn
+        io.mem_port.req.bits.typ := io.core_port.req.bits.typ
         io.core_port.resp.valid := Bool(false)
         io.core_port.resp.bits.data := read_data        
+        	    
+	//set valid = 1 tag bit 
+	dcache_write_data := UInt(0)
+	dcache_write_data(DCACHE_BITS-1,DCACHE_BITS-1) := Bits(1,1)
+        dcache_write_data(DCACHE_BITS-2,DCACHE_BITS-1-DCACHE_TAG_BIT) := tag
+
+	//Load data
+        word_data := Mux1H(UIntToOH(word_offset, width=(burst_len / word_len)),dcache_read_burst)
+        read_data := LoadDataGen(word_data >> (byte_offset << 3), req_typ)
 	
-	//Run
+	//store data
+        val wdata = (StoreDataGen(req_data, req_typ)<< UInt(word_offset<<5))
+        val byte_shift_amt = req_addr(1, 0)
+        val bit_shift_amt  = Cat(byte_shift_amt, UInt(0,3))
+        val wmask = (StoreMask(req_typ) << bit_shift_amt)(31,0)
+        val write_mask = wmask << UInt(word_offset<<5)
+        
+	val csr = Module(new CSRFile())
+	
+	//Control CACHE signal
         switch(state) //idle or load
         {
             is(s_idle)
             {
-                io.core_port.resp.valid := Bool(false)
                 when ( io.core_port.req.valid )
                 {
                     //read access
                     when ( io.core_port.req.bits.fcn === M_XRD )
                     {
 		    	//read hit
-                        io.core_port.resp.valid := Bool(false)
                         when(dcache_read_out(DCACHE_BITS-1,DCACHE_BITS-1) === Bits(1,1) 
                              && dcache_read_out(DCACHE_BITS-2,DCACHE_BITS-1-DCACHE_TAG_BIT) === tag)
                         {
@@ -94,48 +108,29 @@ package object AcaCustom
                                 io.core_port.resp.valid := Bool(true)
                                 for(k <- 0 until 16)
                                      dcache_read_burst(k) := dcache_read_out(32*k+31,32*k) 
-        			word_data := Mux1H(UIntToOH(word_offset, width=(burst_len / word_len)),dcache_read_burst)
-        			read_data := LoadDataGen(word_data >> (byte_offset << 3), req_typ)
                                 io.core_port.resp.bits.data := read_data
                                 state := s_idle
                             }
                         }
-
                         //read miss
                         .otherwise
                         {
                             printf("read miss\n")
                             io.mem_port.req.valid := Bool(true)
-                            io.mem_port.req.bits.addr := io.core_port.req.bits.addr
-                            io.mem_port.req.bits.data := io.core_port.req.bits.data
-                            io.mem_port.req.bits.fcn := io.core_port.req.bits.fcn
-                            io.mem_port.req.bits.typ := io.core_port.req.bits.typ
                             state := s_load
                         }
                     }
-
                     //write access
                     when ( io.core_port.req.bits.fcn === M_XWR )
                     {
                         //write through    always write memory
-                        io.core_port.resp.valid := Bool(false)
                         io.mem_port.req.valid := Bool(true)
-                        io.mem_port.req.bits.addr := io.core_port.req.bits.addr
-                        io.mem_port.req.bits.data := io.core_port.req.bits.data
-                        io.mem_port.req.bits.fcn := io.core_port.req.bits.fcn
-                        io.mem_port.req.bits.typ := io.core_port.req.bits.typ
 
                         //write hit    
                        	when(dcache_read_out(DCACHE_BITS-1,DCACHE_BITS-1) === Bits(1,1) 
                              && dcache_read_out(DCACHE_BITS-2,DCACHE_BITS-1-DCACHE_TAG_BIT) === tag)
 			{
                             printf("write hit\n")
-                            val wdata = (StoreDataGen(req_data, req_typ)<< UInt(word_offset<<5))
-      			    val byte_shift_amt = req_addr(1, 0)
-      			    val bit_shift_amt  = Cat(byte_shift_amt, UInt(0,3))
-         		    val wmask = (StoreMask(req_typ) << bit_shift_amt)(31,0)
-                            val write_mask = wmask << UInt(word_offset<<5)
-                                  
                             dcache.write(index, wdata, write_mask)
                             when ( io.mem_port.resp.valid )
                             {
@@ -151,21 +146,18 @@ package object AcaCustom
 
                 }
             }
-            
-
             //read/write miss , load memory
             is(s_load)
             {
-                //printf("load\n")
-                io.core_port.resp.valid := Bool(false)
                 when ( io.mem_port.resp.valid )
                 {   
-        	    dcache_write_data(DCACHE_BITS-1,DCACHE_BITS-1) := Bits(1,1)
-                    dcache_write_data(DCACHE_BITS-2,DCACHE_BITS-1-DCACHE_TAG_BIT) := tag
                     for(k <- 0 until 16) 
                         dcache_write_data(32*k+31,32*k) := burst_data(k)
                     dcache.write(index, dcache_write_data)
-                    state := s_idle
+		    when(io.core_port.req.bits.fcn === M_XWR){
+                    	io.core_port.resp.valid := Bool(true)
+		    }
+		    state := s_idle
                 }
             }
 
