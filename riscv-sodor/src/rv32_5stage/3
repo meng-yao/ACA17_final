@@ -48,28 +48,27 @@ package object AcaCustom
         io.mem_port.req.bits.fcn := Bits(0)
         io.mem_port.req.bits.typ := Bits(0)
 
-	//DCACHE configuration
-        //valid bit + tag + data bit
-
         val DCACHE_ENTRIES = 1024
         val DCACHE_ENTRIES_BIT = 10
         val DCACHE_TAG_BIT = conf.xprlen-DCACHE_ENTRIES_BIT-burst_len_bit
         val DCACHE_BITS = 1+DCACHE_TAG_BIT+burst_len*8
+        //valid bit + tag + data bit
         
         val dcache = Mem(Bits(width=DCACHE_BITS), DCACHE_ENTRIES)
         val dcache_write_data = UInt(width=DCACHE_BITS)
+        dcache_write_data := UInt(0)
         val dcache_read_burst = Vec.fill(16){Bits(width=conf.xprlen)}
         val dcache_read_data = Bits(width=conf.xprlen)
          
         val tag = req_addr(conf.xprlen-1,conf.xprlen-DCACHE_TAG_BIT)
-        val index = req_addr(conf.xprlen-DCACHE_TAG_BIT-1,conf.xprlen-DCACHE_TAG_BIT-DCACHE_ENTRIES_BIT)
-        val word_offset = req_addr(word_len + word_len_bit -1 , word_len_bit)
+        val index = req_addr(conf.xprlen-DCACHE_TAG_BIT-1,burst_len_bit)
+        val word_offset = req_addr(burst_len-1,word_len_bit)
         val byte_offset = req_addr(word_len_bit-1,0)
         val dcache_read_out = dcache(index)
+        dcache_write_data(DCACHE_BITS-1,DCACHE_BITS-1) := Bits(1,1)
+        dcache_write_data(DCACHE_BITS-2,DCACHE_BITS-1-DCACHE_TAG_BIT) := tag
         val word_data = Bits() 
         val read_data = Bits()
-        
-	dcache_write_data := UInt(0)
         word_data := Mux1H(UIntToOH(word_offset, width=(burst_len / word_len)),dcache_read_burst)
         read_data := LoadDataGen(word_data >> (byte_offset << 3), req_typ)
     
@@ -78,6 +77,16 @@ package object AcaCustom
          dcache_read_burst(k) := Bits(0) 
         }
         
+        /*
+        val test_data = Bits(15,32)
+        val write_mask = Bits(0xffffffffL, 32)
+        //write access
+        when(req_valid && req_fcn === M_XWR){
+            //dcache_write_data(UInt(word_offset)*32+31,UInt(word_offset)*32) := test_data
+            dcache.write(index, test_data , write_mask << (word_offset<<5))
+            printf("!!write access, test_data: %x word_offset: %x \n dcache_read_out: %x\n",test_data,word_offset,dcache_read_out)
+            index_reg := index
+        }*/
 
         val s_idle  :: s_load :: Nil = Enum(UInt(),2)
         val state = Reg(init = s_idle)
@@ -110,6 +119,8 @@ package object AcaCustom
                                 for(k <- 0 until 16)
                                      dcache_read_burst(k) := dcache_read_out(32*k+31,32*k) 
 
+                                word_data := Mux1H(UIntToOH(word_offset, width=(burst_len / word_len)),dcache_read_burst)
+                                read_data := LoadDataGen(word_data >> (byte_offset << 3), req_typ)
                                 io.core_port.resp.bits.data := read_data
                                 state := s_idle
                             }
@@ -166,6 +177,8 @@ package object AcaCustom
                     }
 
                 }
+                val dcache_read_out_2 = dcache(index_reg)
+                //printf("index_reg: %x, cache_line: %x\n", index_reg,dcache_read_out_2)
             }
             
 
@@ -176,12 +189,11 @@ package object AcaCustom
                 io.core_port.resp.valid := Bool(false)
                 when ( io.mem_port.resp.valid )
                 {   
-        	    dcache_write_data(DCACHE_BITS-1,DCACHE_BITS-1) := Bits(1,1)
-                    dcache_write_data(DCACHE_BITS-2,DCACHE_BITS-1-DCACHE_TAG_BIT) := tag
                     for(k <- 0 until 16) 
                         dcache_write_data(32*k+31,32*k) := burst_data(k)
                     dcache.write(index, dcache_write_data)
                     //printf("abc dcache_write_data: %x\n", dcache_write_data)
+		    printf("after_load\n");
                     state := s_idle
                 }
             }
