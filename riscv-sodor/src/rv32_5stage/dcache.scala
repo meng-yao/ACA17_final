@@ -31,6 +31,18 @@ package object AcaCustom
         val req_data       = io.core_port.req.bits.data
         val req_fcn        = io.core_port.req.bits.fcn
         val req_typ        = io.core_port.req.bits.typ
+
+
+	//non-blocking	
+	val isFull = Reg(Bool())
+	val isBusy = Reg(Bool())
+        val req_valid_reg      = Reg(Bool())
+        val req_addr_reg       = Reg(Bits())
+        val req_data_reg       = Reg(Bits())                                                                                                                                                                
+        val req_fcn_reg        = Reg(Bits())
+        val req_typ_reg        = Reg(Bits())
+
+
         
         val burst_data     = io.mem_port.resp.bits.burst_data
         
@@ -86,8 +98,26 @@ package object AcaCustom
         val bit_shift_amt  = Cat(byte_shift_amt, UInt(0,3))
         val wmask = (StoreMask(req_typ) << bit_shift_amt)(31,0)
         val write_mask = wmask << UInt(word_offset<<5)
+	printf("isFull : %x, isBusy: %x\n", isFull,isBusy)
+        when(io.mem_port.resp.valid){
+	    isBusy := Bool(false)
+	}
         
-	val csr = Module(new CSRFile())
+	when(isFull && !isBusy){
+	    io.mem_port.req.valid := Bool(true)
+	    io.mem_port.req.bits.addr := req_valid_reg
+            io.mem_port.req.bits.data := req_data_reg
+            io.mem_port.req.bits.fcn := req_fcn_reg
+            io.mem_port.req.bits.typ := req_typ_reg
+	    isBusy := Bool(true)
+            isFull := Bool(false)
+	}
+	when(isFull && isBusy){
+	    req_valid_reg := req_valid_reg
+	    req_data_reg := req_data_reg
+	    req_fcn_reg := req_fcn_reg
+	    req_typ_reg := req_typ_reg
+        }
 	
 	//Control CACHE signal
         switch(state) //idle or load
@@ -117,30 +147,39 @@ package object AcaCustom
                         {
                             printf("read miss\n")
                             io.mem_port.req.valid := Bool(true)
-                            state := s_load
+			    when(!isBusy && !isFull){
+                                state := s_load
+			    }
                         }
                     }
                     //write access
                     when ( io.core_port.req.bits.fcn === M_XWR )
                     {
-                        //write through    always write memory
+                    
+			//write through    always write memory
                         io.mem_port.req.valid := Bool(true)
-
+			
                         //write hit    
                        	when(dcache_read_out(DCACHE_BITS-1,DCACHE_BITS-1) === Bits(1,1) 
                              && dcache_read_out(DCACHE_BITS-2,DCACHE_BITS-1-DCACHE_TAG_BIT) === tag)
 			{
+			    
                             printf("write hit\n")
                             dcache.write(index, wdata, write_mask)
-                            when ( io.mem_port.resp.valid )
-                            {
-                                io.core_port.resp.valid := Bool(true)
-                                state := s_idle
-                            }
+			    when(!isFull){
+      			       req_addr_reg      := io.core_port.req.bits.addr
+      			       req_data_reg      := io.core_port.req.bits.data  
+      			       req_fcn_reg       := io.core_port.req.bits.fcn  
+      			       req_typ_reg       := io.core_port.req.bits.typ
+			       isFull := Bool(true)
+			       io.core_port.resp.valid := Bool(true)	
+ 			    } 
 			}
 			.otherwise{    //write miss
                             printf("write miss\n")
-                            state := s_load
+			    when(!isBusy && !isFull){
+                               state := s_load
+			    }
 			}
                     }
 
@@ -154,9 +193,6 @@ package object AcaCustom
                     for(k <- 0 until 16) 
                         dcache_write_data(32*k+31,32*k) := burst_data(k)
                     dcache.write(index, dcache_write_data)
-		    when(io.core_port.req.bits.fcn === M_XWR){
-                    	io.core_port.resp.valid := Bool(true)
-		    }
 		    state := s_idle
                 }
             }
