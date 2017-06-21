@@ -32,13 +32,6 @@ package object AcaCustom
         val req_fcn        = io.core_port.req.bits.fcn
         val req_typ        = io.core_port.req.bits.typ
         
-        val req_valid_reg      = Reg(Bool())
-        val req_addr_reg       = Reg(Bits())
-        val req_data_reg       = Reg(Bits())         
-        val req_fcn_reg        = Reg(Bits())
-        val req_typ_reg        = Reg(Bits())
-        val index_reg          = Reg(Bits())
-        
         val burst_data     = io.mem_port.resp.bits.burst_data
         
         // Wiring
@@ -49,8 +42,6 @@ package object AcaCustom
         io.mem_port.req.bits.typ := Bits(0)
 
 	//DCACHE configuration
-        //valid bit + tag + data bit
-
         val DCACHE_ENTRIES = 1024
         val DCACHE_ENTRIES_BIT = 10
         val DCACHE_TAG_BIT = conf.xprlen-DCACHE_ENTRIES_BIT-burst_len_bit
@@ -69,53 +60,48 @@ package object AcaCustom
         val word_data = Bits() 
         val read_data = Bits()
         
-	dcache_write_data := UInt(0)
-        word_data := Mux1H(UIntToOH(word_offset, width=(burst_len / word_len)),dcache_read_burst)
-        read_data := LoadDataGen(word_data >> (byte_offset << 3), req_typ)
-    
-        for(k <- 0 until 16)
-        {
-         dcache_read_burst(k) := Bits(0) 
-        }
-        
-
+	//FSM Information
         val s_idle  :: s_load :: Nil = Enum(UInt(),2)
         val state = Reg(init = s_idle)
+	
+	//Init
+	dcache_write_data := UInt(0)
+	word_data := UInt(0)
+	read_data := UInt(0) 
+        for(k <- 0 until 16)
+            dcache_read_burst(k) := Bits(0) 
         io.core_port.resp.valid := Bool(false)
         io.core_port.resp.bits.data := read_data        
-        switch(state)
+	
+	//Run
+        switch(state) //idle or load
         {
             is(s_idle)
             {
-                //printf("idle\n")
                 io.core_port.resp.valid := Bool(false)
-                
                 when ( io.core_port.req.valid )
                 {
-		    //io.core_port.req.valid := Bool(false)
                     //read access
                     when ( io.core_port.req.bits.fcn === M_XRD )
                     {
 		    	//read hit
-                        //printf("read\n")
                         io.core_port.resp.valid := Bool(false)
-			//printf("tag : %x\n",tag)
                         when(dcache_read_out(DCACHE_BITS-1,DCACHE_BITS-1) === Bits(1,1) 
                              && dcache_read_out(DCACHE_BITS-2,DCACHE_BITS-1-DCACHE_TAG_BIT) === tag)
                         {
                             {
                         	printf("read hit\n")
-			    	
                                 io.core_port.resp.valid := Bool(true)
                                 for(k <- 0 until 16)
                                      dcache_read_burst(k) := dcache_read_out(32*k+31,32*k) 
-
+        			word_data := Mux1H(UIntToOH(word_offset, width=(burst_len / word_len)),dcache_read_burst)
+        			read_data := LoadDataGen(word_data >> (byte_offset << 3), req_typ)
                                 io.core_port.resp.bits.data := read_data
                                 state := s_idle
                             }
                         }
 
-                        //cache miss, load memory
+                        //read miss
                         .otherwise
                         {
                             printf("read miss\n")
@@ -127,18 +113,18 @@ package object AcaCustom
                             state := s_load
                         }
                     }
+
                     //write access
                     when ( io.core_port.req.bits.fcn === M_XWR )
                     {
-                        //printf("write\n")
-                           
-                        //write memory
+                        //write through    always write memory
                         io.core_port.resp.valid := Bool(false)
                         io.mem_port.req.valid := Bool(true)
                         io.mem_port.req.bits.addr := io.core_port.req.bits.addr
                         io.mem_port.req.bits.data := io.core_port.req.bits.data
                         io.mem_port.req.bits.fcn := io.core_port.req.bits.fcn
                         io.mem_port.req.bits.typ := io.core_port.req.bits.typ
+
                         //write hit    
                        	when(dcache_read_out(DCACHE_BITS-1,DCACHE_BITS-1) === Bits(1,1) 
                              && dcache_read_out(DCACHE_BITS-2,DCACHE_BITS-1-DCACHE_TAG_BIT) === tag)
@@ -149,12 +135,10 @@ package object AcaCustom
       			    val bit_shift_amt  = Cat(byte_shift_amt, UInt(0,3))
          		    val wmask = (StoreMask(req_typ) << bit_shift_amt)(31,0)
                             val write_mask = wmask << UInt(word_offset<<5)
-                            //printf("index= %x, req_data= %x, wdata= %x, wmask=%x \n",index,req_data,wdata,write_mask)
                                   
                             dcache.write(index, wdata, write_mask)
                             when ( io.mem_port.resp.valid )
                             {
-                            //    printf("memory response\n")
                                 io.core_port.resp.valid := Bool(true)
                                 state := s_idle
                             }
@@ -169,7 +153,7 @@ package object AcaCustom
             }
             
 
-            //cache miss, load memory
+            //read/write miss , load memory
             is(s_load)
             {
                 //printf("load\n")
@@ -181,7 +165,6 @@ package object AcaCustom
                     for(k <- 0 until 16) 
                         dcache_write_data(32*k+31,32*k) := burst_data(k)
                     dcache.write(index, dcache_write_data)
-                    //printf("abc dcache_write_data: %x\n", dcache_write_data)
                     state := s_idle
                 }
             }
