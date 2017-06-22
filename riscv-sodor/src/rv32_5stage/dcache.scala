@@ -36,8 +36,8 @@ package object AcaCustom
         
 
 	//DCACHE configuration
-        val DCACHE_ENTRIES = 1024
-        val DCACHE_ENTRIES_BIT = 10
+        val DCACHE_ENTRIES = 128
+        val DCACHE_ENTRIES_BIT = 7
         val DCACHE_TAG_BIT = conf.xprlen-DCACHE_ENTRIES_BIT-burst_len_bit
         val DCACHE_BITS = 1+DCACHE_TAG_BIT+burst_len*8
         
