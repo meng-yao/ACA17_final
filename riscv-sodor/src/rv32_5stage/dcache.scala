@@ -106,6 +106,13 @@ package object AcaCustom
 	    isBusy := Bool(false)
 	}
 
+	printf("is_full: %x, is_busy: %x\n", isFull, isBusy)
+        printf("req_addr_reg: %x\nreq_data_reg: %x \nreq_fcn_reg : %x \nreq_typ_reg : %x \n"
+            , req_addr_reg
+            , req_data_reg
+            , req_fcn_reg 
+            , req_typ_reg)
+        printf("mem.resp.valid: %x\n", io.mem_port.resp.valid)	
 
         // Define state machine
         val s_idle :: s_load :: Nil = Enum(UInt(),2)
@@ -122,10 +129,12 @@ package object AcaCustom
 		    	//read hit
                         when(dcache_read_out(DCACHE_BITS-1,DCACHE_BITS-1) === Bits(1,1) 
                              && dcache_read_out(DCACHE_BITS-2,DCACHE_BITS-1-DCACHE_TAG_BIT) === tag
-			     && !isFull && !isBusy)
+			    )
                         {
-                            io.core_port.resp.valid := Bool(true)
-		            state := s_idle
+			    when(!isFull && !isBusy){
+                                io.core_port.resp.valid := Bool(true)
+		                state := s_idle
+                            }
                         }
                         //read miss
                         .otherwise
@@ -145,31 +154,15 @@ package object AcaCustom
                        	when(dcache_read_out(DCACHE_BITS-1,DCACHE_BITS-1) === Bits(1,1) 
                              && dcache_read_out(DCACHE_BITS-2,DCACHE_BITS-1-DCACHE_TAG_BIT) === tag)
 			{
-			    
-                            dcache.write(index, wdata, write_mask)
-			    when(!isFull && isBusy){
+			    when(!isFull){
       			       req_addr_reg      := io.core_port.req.bits.addr
       			       req_data_reg      := io.core_port.req.bits.data  
       			       req_fcn_reg       := io.core_port.req.bits.fcn  
       			       req_typ_reg       := io.core_port.req.bits.typ
+                               dcache.write(index, wdata, write_mask)
                                io.core_port.resp.valid := Bool(true)
 			       isFull := Bool(true)
  			    }
-			    when(!isFull && !isBusy){
-			       io.mem_port.req.valid := Bool(true)
-			       isBusy := Bool(true)
-                               io.core_port.resp.valid := Bool(true)
-			    }
-		/*	    when(!isFull){
-      			       req_addr_reg      := io.core_port.req.bits.addr
-      			       req_data_reg      := io.core_port.req.bits.data  
-      			       req_fcn_reg       := io.core_port.req.bits.fcn  
-      			       req_typ_reg       := io.core_port.req.bits.typ
-			       isFull := Bool(true)
-                               dcache.write(index, wdata, write_mask)
-                               io.core_port.resp.valid := Bool(true)
-		                 		 
-			    }*/
 			}
 			.otherwise{    //write miss
 			    when(!isBusy && !isFull){
@@ -185,7 +178,6 @@ package object AcaCustom
             //Read miss, load memory
             is(s_load)
             {
-                printf("state: s_load\n")
                 when ( io.mem_port.resp.valid )
                 {   
                     dcache.write(index, dcache_write_data)
@@ -194,7 +186,7 @@ package object AcaCustom
             }
         }
 
-        }
+    }
 
     type DCache = NoDCache2
 
