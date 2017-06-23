@@ -55,7 +55,7 @@ package object AcaCustom
         val word_offset = req_addr(burst_len_bit -1 , 2)
         val byte_offset = req_addr(1,0)
         
-	val dcache = Mem(Bits(width=DCACHE_BITS), DCACHE_ENTRIES)
+	val dcache = Mem(Bits(width=DCACHE_BITS), DCACHE_ENTRIES, seqRead = false)
         val dcache_write_data = UInt(width=DCACHE_BITS)
         val dcache_read_out = dcache(index)
         val dcache_read_burst = Vec.fill(16){Bits(width=conf.xprlen)}
@@ -128,10 +128,10 @@ package object AcaCustom
                     {
 		    	//read hit
                         when(dcache_read_out(DCACHE_BITS-1,DCACHE_BITS-1) === Bits(1,1) 
-                             && dcache_read_out(DCACHE_BITS-2,DCACHE_BITS-1-DCACHE_TAG_BIT) === tag
-			    )
+                             && dcache_read_out(DCACHE_BITS-2,DCACHE_BITS-1-DCACHE_TAG_BIT) === tag)
                         {
-			    when(!isFull && !isBusy){
+			    when(!isFull && !isBusy)
+			    {
                                 io.core_port.resp.valid := Bool(true)
 		                state := s_idle
                             }
